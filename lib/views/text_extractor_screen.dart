@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -5,6 +7,8 @@ import 'package:provider/provider.dart';
 import '../controllers/text_extractor_controller.dart';
 import '../core/app_theme.dart';
 import '../models/paint_label_data.dart';
+import 'ocr_rules_manager_screen.dart';
+import 'widgets/ocr_mapping_dialog.dart';
 
 /// Screen for capturing/uploading photos of paint cartons or buckets,
 /// extracting specific target fields (Paint Name, MRP, USP, Pack Qty, Mfd, Batch),
@@ -18,6 +22,44 @@ class TextExtractorScreen extends StatefulWidget {
 
 class _TextExtractorScreenState extends State<TextExtractorScreen> {
   bool _showRawText = false;
+
+  void _showFullImageViewer(BuildContext context, File imageFile) {
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.94),
+      builder: (ctx) {
+        return Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: AppBar(
+            backgroundColor: Colors.transparent,
+            foregroundColor: Colors.white,
+            elevation: 0,
+            title: const Text(
+              'Label Photo (Pinch to Zoom)',
+              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+            leading: IconButton(
+              icon: const Icon(Icons.close_rounded, color: Colors.white, size: 26),
+              onPressed: () => Navigator.of(ctx).pop(),
+            ),
+          ),
+          body: SafeArea(
+            child: Center(
+              child: InteractiveViewer(
+                panEnabled: true,
+                minScale: 0.5,
+                maxScale: 6.0,
+                child: Image.file(
+                  imageFile,
+                  fit: BoxFit.contain,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
 
   void _copyToClipboard(BuildContext context, String text, String label) {
     if (text.trim().isEmpty) return;
@@ -60,6 +102,15 @@ class _TextExtractorScreenState extends State<TextExtractorScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Dynamic OCR Rules',
+            icon: const Icon(Icons.tune_rounded, color: AppColors.textSecondary),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const OcrRulesManagerScreen()),
+              );
+            },
+          ),
           if (controller.hasResult || controller.imageFile != null)
             IconButton(
               tooltip: 'Clear & New Scan',
@@ -249,7 +300,7 @@ class _TextExtractorScreenState extends State<TextExtractorScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Image Preview Thumbnail
+          // Image Preview Thumbnail (Clickable to view full image & zoom)
           if (controller.imageFile != null)
             Container(
               padding: const EdgeInsets.all(10),
@@ -261,34 +312,71 @@ class _TextExtractorScreenState extends State<TextExtractorScreen> {
               ),
               child: Row(
                 children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Image.file(
-                      controller.imageFile!,
-                      width: 55,
-                      height: 55,
-                      fit: BoxFit.cover,
+                  GestureDetector(
+                    onTap: () => _showFullImageViewer(context, controller.imageFile!),
+                    child: Stack(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.file(
+                            controller.imageFile!,
+                            width: 58,
+                            height: 58,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                        Positioned(
+                          right: 2,
+                          bottom: 2,
+                          child: Container(
+                            padding: const EdgeInsets.all(2),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.65),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Icon(
+                              Icons.zoom_in_rounded,
+                              color: Colors.white,
+                              size: 14,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   const SizedBox(width: 12),
-                  const Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Captured Label',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.textPrimary,
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => _showFullImageViewer(context, controller.imageFile!),
+                      behavior: HitTestBehavior.opaque,
+                      child: const Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                'Captured Label',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
+                              SizedBox(width: 4),
+                              Icon(Icons.open_in_full_rounded, size: 12, color: AppColors.primary),
+                            ],
                           ),
-                        ),
-                        SizedBox(height: 2),
-                        Text(
-                          'Target fields extracted offline',
-                          style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
-                        ),
-                      ],
+                          SizedBox(height: 2),
+                          Text(
+                            'Tap image to view full size & zoom',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: AppColors.primary,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                   ElevatedButton.icon(
@@ -505,19 +593,21 @@ class _TextExtractorScreenState extends State<TextExtractorScreen> {
           ),
           const Divider(height: 1, indent: 64, color: Color(0xFFF1F5F9)),
 
-          // 2. UNIT SALE PRICE
-          _buildCardRow(
-            context,
-            label: 'UNIT SALE PRICE',
-            subtitle: 'Per litre / per ml rate',
-            value: data.unitSalePrice ?? 'Not detected',
-            isAvailable: data.unitSalePrice != null,
-            icon: Icons.sell_rounded,
-            iconColor: const Color(0xFF4F46E5),
-            iconBgColor: const Color(0xFFEEF2FF),
-            valueColor: const Color(0xFF4F46E5),
-          ),
-          const Divider(height: 1, indent: 64, color: Color(0xFFF1F5F9)),
+          // 2. UNIT SALE PRICE (Only displayed if actually present in the image)
+          if (data.unitSalePrice != null && data.unitSalePrice!.trim().isNotEmpty) ...[
+            _buildCardRow(
+              context,
+              label: 'UNIT SALE PRICE',
+              subtitle: 'Per litre / per ml rate',
+              value: data.unitSalePrice!,
+              isAvailable: true,
+              icon: Icons.sell_rounded,
+              iconColor: const Color(0xFF4F46E5),
+              iconBgColor: const Color(0xFFEEF2FF),
+              valueColor: const Color(0xFF4F46E5),
+            ),
+            const Divider(height: 1, indent: 64, color: Color(0xFFF1F5F9)),
+          ],
 
           // 3. NET QUANTITY
           _buildCardRow(
@@ -531,7 +621,8 @@ class _TextExtractorScreenState extends State<TextExtractorScreen> {
           ),
           const Divider(height: 1, indent: 64, color: Color(0xFFF1F5F9)),
 
-          // 4. MFD
+          /*
+          // 4. MFD (Commented out as requested - not removed)
           _buildCardRow(
             context,
             label: 'MFD',
@@ -543,6 +634,7 @@ class _TextExtractorScreenState extends State<TextExtractorScreen> {
             iconBgColor: const Color(0xFFF5F3FF),
           ),
           const Divider(height: 1, indent: 64, color: Color(0xFFF1F5F9)),
+          */
 
           // 5. PAINT NAME
           _buildCardRow(
@@ -557,7 +649,8 @@ class _TextExtractorScreenState extends State<TextExtractorScreen> {
             valueSize: 16,
           ),
 
-          // 6. BASE (if BASE exists there)
+          /*
+          // 6. BASE (Commented out as requested - not removed)
           if (data.base != null && data.base!.trim().isNotEmpty) ...[
             const Divider(height: 1, indent: 64, color: Color(0xFFF1F5F9)),
             _buildCardRow(
@@ -571,6 +664,7 @@ class _TextExtractorScreenState extends State<TextExtractorScreen> {
               iconBgColor: const Color(0xFFECFEFF),
             ),
           ],
+          */
 
           // 7. HARDENER (if HARDENER exists then show)
           if (data.hardener != null && data.hardener!.trim().isNotEmpty) ...[
@@ -587,7 +681,8 @@ class _TextExtractorScreenState extends State<TextExtractorScreen> {
             ),
           ],
 
-          // 8. BATCH NO. (if exists)
+          /*
+          // 8. BATCH NO. (Commented out as requested - not removed)
           if (data.batchNo != null && data.batchNo!.trim().isNotEmpty) ...[
             const Divider(height: 1, indent: 64, color: Color(0xFFF1F5F9)),
             _buildCardRow(
@@ -600,8 +695,60 @@ class _TextExtractorScreenState extends State<TextExtractorScreen> {
               iconBgColor: const Color(0xFFF1F5F9),
             ),
           ],
+          */
+
+          // Footer: Dynamic OCR training & manual mapping action
+          const Divider(height: 1, color: Color(0xFFE2E8F0)),
+          InkWell(
+            onTap: () => _openMappingDialog(context, context.read<TextExtractorController>()),
+            borderRadius: const BorderRadius.vertical(bottom: Radius.circular(16)),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: const BoxDecoration(
+                color: Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.vertical(bottom: Radius.circular(16)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.psychology_outlined, size: 20, color: AppColors.primary),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Unrecognized brand or text? Map & train dynamic rule',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                  ),
+                  Icon(Icons.chevron_right_rounded, size: 20, color: AppColors.primary),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
+    );
+  }
+
+  void _openMappingDialog(BuildContext context, TextExtractorController controller) {
+    OcrMappingBottomSheet.show(
+      context,
+      detectedLines: controller.extractedResult?.lines ?? [],
+      onSave: ({
+        required String category,
+        required String token,
+        String? targetValue,
+        String? parentBrand,
+      }) async {
+        await controller.saveDynamicRuleAndReprocess(
+          category: category,
+          token: token,
+          targetValue: targetValue,
+          parentBrand: parentBrand,
+        );
+      },
     );
   }
 

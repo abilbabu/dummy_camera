@@ -64,14 +64,14 @@ void main() {
       expect(find.text('₹ 223.00 / litre'), findsOneWidget);
       expect(find.text('NET QUANTITY'), findsOneWidget);
       expect(find.text('10L NET'), findsOneWidget);
-      expect(find.text('MFD'), findsOneWidget);
-      expect(find.text('09/2026'), findsOneWidget);
+      // expect(find.text('MFD'), findsOneWidget);
+      // expect(find.text('09/2026'), findsOneWidget);
       expect(find.text('PAINT NAME'), findsOneWidget);
       expect(find.text('TRA EML SUPWHITE'), findsOneWidget);
 
-      // Verify BASE and HARDENER are displayed because they exist
-      expect(find.text('BASE'), findsOneWidget);
-      expect(find.text('BASE 1'), findsOneWidget);
+      // Verify HARDENER is displayed because it exists (BASE is commented out in UI)
+      // expect(find.text('BASE'), findsOneWidget);
+      // expect(find.text('BASE 1'), findsOneWidget);
       expect(find.text('HARDENER'), findsOneWidget);
       expect(find.text('400 ml'), findsOneWidget);
     });

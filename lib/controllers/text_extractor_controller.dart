@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../models/extracted_text_result.dart';
 import '../models/paint_label_data.dart';
+import '../services/extraction_rules_repository.dart';
 import '../services/ocr_service.dart';
 import '../services/paint_label_extractor.dart';
 
@@ -12,12 +13,21 @@ import '../services/paint_label_extractor.dart';
 class TextExtractorController extends ChangeNotifier {
   final OcrService _ocrService;
   final ImagePicker _picker;
+  final ExtractionRulesRepository _rulesRepository;
 
   TextExtractorController({
     OcrService? ocrService,
     ImagePicker? picker,
+    ExtractionRulesRepository? rulesRepository,
   })  : _ocrService = ocrService ?? OcrService(),
-        _picker = picker ?? ImagePicker();
+        _picker = picker ?? ImagePicker(),
+        _rulesRepository = rulesRepository ?? ExtractionRulesRepository() {
+    _rulesRepository.addListener(_onRulesChanged);
+  }
+
+  void _onRulesChanged() {
+    reExtract();
+  }
 
   File? _imageFile;
   ExtractedTextResult? _extractedResult;
@@ -26,6 +36,7 @@ class TextExtractorController extends ChangeNotifier {
   String? _errorMessage;
 
   // Getters
+  ExtractionRulesRepository get rulesRepository => _rulesRepository;
   File? get imageFile => _imageFile;
   ExtractedTextResult? get extractedResult => _extractedResult;
   PaintLabelData? get paintLabelData => _paintLabelData;
@@ -52,6 +63,7 @@ class TextExtractorController extends ChangeNotifier {
     try {
       final XFile? picked = await _picker.pickImage(
         source: source,
+        preferredCameraDevice: CameraDevice.rear,
         imageQuality: 95,
       );
 
@@ -68,8 +80,12 @@ class TextExtractorController extends ChangeNotifier {
       final result = await _ocrService.extractText(_imageFile!);
       _extractedResult = result;
 
-      // 2. Parse structured fields (Paint Name, MRP, USP, Pack Qty, Mfd, Batch)
-      _paintLabelData = PaintLabelExtractor.extract(result.lines, result.fullText);
+      // 2. Parse structured fields using active dynamic rules from DB cache
+      _paintLabelData = PaintLabelExtractor.extract(
+        result.lines,
+        result.fullText,
+        _rulesRepository.cachedRules,
+      );
 
       _isProcessing = false;
       notifyListeners();
@@ -78,6 +94,34 @@ class TextExtractorController extends ChangeNotifier {
       _isProcessing = false;
       notifyListeners();
     }
+  }
+
+  /// Re-parse structured fields using current active dynamic rules
+  void reExtract() {
+    if (_extractedResult != null) {
+      _paintLabelData = PaintLabelExtractor.extract(
+        _extractedResult!.lines,
+        _extractedResult!.fullText,
+        _rulesRepository.cachedRules,
+      );
+      notifyListeners();
+    }
+  }
+
+  /// Dynamically map an unrecognized token into the local database and re-extract
+  Future<void> saveDynamicRuleAndReprocess({
+    required String category,
+    required String token,
+    String? targetValue,
+    String? parentBrand,
+  }) async {
+    await _rulesRepository.addRule(
+      category: category,
+      token: token,
+      targetValue: targetValue,
+      parentBrand: parentBrand,
+    );
+    reExtract();
   }
 
   /// Allow user to edit the extracted text and re-parse structured fields
@@ -90,7 +134,11 @@ class TextExtractorController extends ChangeNotifier {
         imagePath: _extractedResult!.imagePath,
         extractedAt: _extractedResult!.extractedAt,
       );
-      _paintLabelData = PaintLabelExtractor.extract(lines, newText);
+      _paintLabelData = PaintLabelExtractor.extract(
+        lines,
+        newText,
+        _rulesRepository.cachedRules,
+      );
       notifyListeners();
     }
   }
@@ -139,6 +187,7 @@ class TextExtractorController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _rulesRepository.removeListener(_onRulesChanged);
     _ocrService.dispose();
     super.dispose();
   }

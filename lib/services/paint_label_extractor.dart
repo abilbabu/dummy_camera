@@ -1,15 +1,20 @@
+import '../models/extraction_rules.dart';
 import '../models/paint_label_data.dart';
-
-/// Metadata pairing a paint sub-brand/product line with its parent manufacturer brand.
-class _SubBrandMeta {
-  final String parentBrand;
-  final String subBrand;
-  const _SubBrandMeta(this.parentBrand, this.subBrand);
-}
+import '../models/sub_brand_meta.dart';
 
 /// Intelligent field extractor for paint carton boxes and bucket labels (Amazon Textract style).
 /// Extracts ONLY the critical structured data while filtering out background boilerplate.
 class PaintLabelExtractor {
+  /// Default factory extraction rules
+  static final ExtractionRules defaultRules = ExtractionRules.defaults();
+
+  // Public accessors to factory defaults
+  static List<String> get defaultBrandAndBoilerplate => DefaultExtractionRules.defaultBrandAndBoilerplate;
+  static Map<String, String> get defaultKnownBrands => DefaultExtractionRules.defaultKnownBrands;
+  static Map<String, SubBrandMeta> get defaultKnownSubBrands => DefaultExtractionRules.defaultKnownSubBrands;
+  static List<String> get defaultPaintPrefixes => DefaultExtractionRules.defaultPaintPrefixes;
+  static Set<String> get defaultBrandTokensToSkip => DefaultExtractionRules.defaultBrandTokensToSkip;
+
   // Regex for Pack Quantity (e.g., "4Nos. X 4L NET", "8Nos. x 500ml NET", "20L NET", "10L NET", "1L HET")
   static final RegExp _packQtyRegex = RegExp(
     r'(\d+\s*(?:Nos?\.?)?\s*[xX*]\s*[\d.]+\s*(?:ml|l|litre|liter|ltr)(?:\s*(?:NET|HET))?|[\d.]+\s*(?:ml|l|litre|liter|ltr)(?:\s*(?:NET|HET))?|\b\d+(?:\.\d+)?\s*(?:ml|l|litre|liter|ltr)\b)',
@@ -28,349 +33,13 @@ class PaintLabelExtractor {
     caseSensitive: false,
   );
 
-  // Brand and legal words to strictly filter OUT (never consider as Paint Name)
-  static final List<String> _brandAndBoilerplate = [
-    'ASIAN PAINTS',
-    'PUNJAB PAINT',
-    'COLOUR & VARNISH',
-    'LIMITED',
-    'LTD',
-    'REGD. OFFICE',
-    'REGD OFFICE',
-    'MADAN STREET',
-    'SHANTINAGAR',
-    'SANTACRUZ',
-    'MUMBAI',
-    'KOLKATA',
-    'WEST BENGAL',
-    'MAHARASHTRA',
-    'FOR FEEDBACK',
-    'COMPLAINTS',
-    'CUSTOMERCARE',
-    'CENTRICITY MANAGER',
-    'LEAD CONTENT',
-    'BEST BEFORE',
-    'INCL. OF ALL TAXES',
-    'INCL.OF ALL TAXES',
-    'PER LITRE',
-    'PER ML',
-    'ADD COLORANTS',
-    'COLORANTS COST EXTRA',
-    'PAINTS',
-    'FOR INDUSTRIAL',
-    'STORE IN',
-    'KEEP AWAY',
-  ];
-
-  /// Known paint brand names with their canonical display form.
-  /// Key: uppercase token(s) to match in OCR text.
-  /// Value: canonical brand display name.
-  /// NOTE: Sub-brands like APCOFRESH, APEX, ROYALE are product lines — do NOT list here.
-  static final Map<String, String> _knownBrands = {
-    // ── Asian Paints group ──────────────────────────────────────────
-    'ASIAN PAINTS': 'Asian Paints',
-    'ASIANPAINTS': 'Asian Paints',
-    'APCOLITE': 'Asian Paints',
-
-    // ── Aditya Birla Group (Birla Opus & Birla White) ──────────────
-    'BIRLA OPUS': 'Birla Opus',
-    'BIRLAOPUS': 'Birla Opus',
-    'BIRLA OPUS PAINTS': 'Birla Opus',
-    'OPUS': 'Birla Opus',
-    'BIRLA WHITE': 'Birla White',
-    'BIRLAWHITE': 'Birla White',
-
-    // ── Berger Paints group ─────────────────────────────────────────
-    'BERGER PAINTS': 'Berger Paints',
-    'BERGER': 'Berger Paints',
-    'BRITISH PAINTS': 'British Paints',
-    'RAJDOOT PAINTS': 'Rajdoot Paints',
-    'RAJDOOT': 'Rajdoot Paints',
-
-    // ── Kansai Nerolac ─────────────────────────────────────────────
-    'KANSAI NEROLAC': 'Kansai Nerolac',
-    'NEROLAC': 'Nerolac',
-    'KANSAI': 'Kansai Nerolac',
-
-    // ── AkzoNobel / Dulux ──────────────────────────────────────────
-    'AKZO NOBEL': 'AkzoNobel',
-    'AKZONOBEL': 'AkzoNobel',
-    'DULUX': 'Dulux',
-    'ICI DULUX': 'Dulux',
-    'SIKKENS': 'Sikkens',
-
-    // ── JSW Paints ─────────────────────────────────────────────────
-    'JSW PAINTS': 'JSW Paints',
-    'JSW': 'JSW Paints',
-
-    // ── Indigo Paints ──────────────────────────────────────────────
-    'INDIGO PAINTS': 'Indigo Paints',
-    'INDIGO': 'Indigo Paints',
-
-    // ── Nippon Paint ───────────────────────────────────────────────
-    'NIPPON PAINT': 'Nippon Paint',
-    'NIPPON': 'Nippon Paint',
-
-    // ── Shalimar Paints ────────────────────────────────────────────
-    'SHALIMAR PAINTS': 'Shalimar Paints',
-    'SHALIMAR': 'Shalimar Paints',
-
-    // ── Sheenlac Paints ────────────────────────────────────────────
-    'SHEENLAC PAINTS': 'Sheenlac',
-    'SHEENLAC': 'Sheenlac',
-
-    // ── Sirca Paints (Wood & Luxury Wall Finishes) ──────────────────
-    'SIRCA PAINTS': 'Sirca',
-    'SIRCA': 'Sirca',
-
-    // ── Kamdhenu Paints ────────────────────────────────────────────
-    'KAMDHENU PAINTS': 'Kamdhenu Paints',
-    'KAMDHENU': 'Kamdhenu Paints',
-
-    // ── Astral Paints (Gem Paints) ─────────────────────────────────
-    'ASTRAL PAINTS': 'Astral Paints',
-    'ASTRAL': 'Astral Paints',
-    'GEM PAINTS': 'Gem Paints',
-
-    // ── Snowcem Paints ─────────────────────────────────────────────
-    'SNOWCEM PAINTS': 'Snowcem',
-    'SNOWCEM': 'Snowcem',
-
-    // ── Jotun Paints ───────────────────────────────────────────────
-    'JOTUN PAINTS': 'Jotun',
-    'JOTUN': 'Jotun',
-
-    // ── Pidilite / ICA Pidilite ────────────────────────────────────
-    'ICA PIDILITE': 'ICA Pidilite',
-    'PIDILITE': 'Pidilite',
-    'DR. FIXIT': 'Dr. Fixit',
-    'DR FIXIT': 'Dr. Fixit',
-    'ROFF': 'Roff',
-
-    // ── MRF Corp (Vapocure / WoodCoat) ─────────────────────────────
-    'MRF VAPOCURE': 'MRF Corp',
-    'MRF PAINTS': 'MRF Corp',
-    'MRF CORP': 'MRF Corp',
-    'MRF': 'MRF Corp',
-
-    // ── Surfa Coats Paints ─────────────────────────────────────────
-    'SURFA COATS': 'Surfa Coats',
-    'SURFACOATS': 'Surfa Coats',
-
-    // ── Apollo Paints ──────────────────────────────────────────────
-    'APOLLO PAINTS': 'Apollo Paints',
-
-    // ── Sakarni Plasters & Paints ──────────────────────────────────
-    'SAKARNI PAINTS': 'Sakarni',
-    'SAKARNI': 'Sakarni',
-
-    // ── National Paints ────────────────────────────────────────────
-    'NATIONAL PAINTS': 'National Paints',
-
-    // ── Garware Paints ─────────────────────────────────────────────
-    'GARWARE PAINTS': 'Garware Paints',
-    'GARWARE': 'Garware Paints',
-
-    // ── Esdee Paints (Auto & Industrial) ───────────────────────────
-    'ESDEE PAINTS': 'Esdee Paints',
-    'ESDEE': 'Esdee Paints',
-
-    // ── Grand Polycoats ────────────────────────────────────────────
-    'GRAND POLYCOATS': 'Grand Polycoats',
-
-    // ── Camlin (Kokuyo Camlin) ─────────────────────────────────────
-    'KOKUYO CAMLIN': 'Camlin',
-    'CAMLIN': 'Camlin',
-
-    // ── Others / Specialty ─────────────────────────────────────────
-    'MARVEL PAINTS': 'Marvel Paints',
-    'VIPUL PAINTS': 'Vipul Paints',
-    'RAL': 'RAL',
-  };
-
-  /// Mapping of major Indian paint sub-brands & product lines to their parent company.
-  /// Resolves parent brand even when only sub-brand is prominent, and provides structured subBrand field.
-  static final Map<String, _SubBrandMeta> _knownSubBrands = {
-    // ── Asian Paints ────────────────────────────────────────────────
-    'APCOLITE': _SubBrandMeta('Asian Paints', 'Apcolite'),
-    'ROYALE': _SubBrandMeta('Asian Paints', 'Royale'),
-    'APEX': _SubBrandMeta('Asian Paints', 'Apex'),
-    'APEX ULTIMA': _SubBrandMeta('Asian Paints', 'Apex Ultima'),
-    'ULTIMA': _SubBrandMeta('Asian Paints', 'Apex Ultima'),
-    'TRACTOR': _SubBrandMeta('Asian Paints', 'Tractor'),
-    'TRA EML': _SubBrandMeta('Asian Paints', 'Tractor'),
-    'ACE': _SubBrandMeta('Asian Paints', 'Ace'),
-    'SMARTCARE': _SubBrandMeta('Asian Paints', 'SmartCare'),
-    'DAMPROOF': _SubBrandMeta('Asian Paints', 'SmartCare'),
-    'WOODTECH': _SubBrandMeta('Asian Paints', 'WoodTech'),
-    'TRUCARE': _SubBrandMeta('Asian Paints', 'TruCare'),
-    'APCOFRESH': _SubBrandMeta('Asian Paints', 'ApcoFresh'),
-    'APCOFRSH': _SubBrandMeta('Asian Paints', 'ApcoFresh'),
-    'DECOPRIME': _SubBrandMeta('Asian Paints', 'DecoPrime'),
-    'PGE': _SubBrandMeta('Asian Paints', 'PGE Enamel'),
-
-    // ── Berger Paints ───────────────────────────────────────────────
-    'WEATHERCOAT': _SubBrandMeta('Berger Paints', 'WeatherCoat'),
-    'SILK GLAMOR': _SubBrandMeta('Berger Paints', 'Silk Glamor'),
-    'SILK': _SubBrandMeta('Berger Paints', 'Silk'),
-    'BISON': _SubBrandMeta('Berger Paints', 'Bison'),
-    'LUXOL': _SubBrandMeta('Berger Paints', 'Luxol'),
-    'WALMASTA': _SubBrandMeta('Berger Paints', 'Walmasta'),
-    'BREATHE EASY': _SubBrandMeta('Berger Paints', 'Breathe Easy'),
-    'WOODKEEPER': _SubBrandMeta('Berger Paints', 'WoodKeeper'),
-    'HOMESHIELD': _SubBrandMeta('Berger Paints', 'HomeShield'),
-    'ILLUSION': _SubBrandMeta('Berger Paints', 'Illusion'),
-    'RANGOLI': _SubBrandMeta('Berger Paints', 'Rangoli'),
-
-    // ── Kansai Nerolac ──────────────────────────────────────────────
-    'IMPRESSIONS': _SubBrandMeta('Kansai Nerolac', 'Impressions'),
-    'EXCEL': _SubBrandMeta('Kansai Nerolac', 'Excel'),
-    'BEAUTY': _SubBrandMeta('Kansai Nerolac', 'Beauty'),
-    'SURAKSHA': _SubBrandMeta('Kansai Nerolac', 'Suraksha'),
-    'SOLDIER': _SubBrandMeta('Kansai Nerolac', 'Soldier'),
-    'PERMASHIELD': _SubBrandMeta('Kansai Nerolac', 'PermaShield'),
-
-    // ── AkzoNobel / Dulux ───────────────────────────────────────────
-    'VELVET TOUCH': _SubBrandMeta('Dulux', 'Velvet Touch'),
-    'WEATHERSHIELD': _SubBrandMeta('Dulux', 'Weathershield'),
-    'PROMISE': _SubBrandMeta('Dulux', 'Promise'),
-    'SIMPLY REFRESH': _SubBrandMeta('Dulux', 'Simply Refresh'),
-    'SUPERCLEAN': _SubBrandMeta('Dulux', 'SuperClean'),
-    'AQUATECH': _SubBrandMeta('Dulux', 'Aquatech'),
-    'DUWEL': _SubBrandMeta('Dulux', 'Duwel'),
-
-    // ── Birla Opus (Aditya Birla Group) ─────────────────────────────
-    'CALISTA': _SubBrandMeta('Birla Opus', 'Calista'),
-    'STYLE': _SubBrandMeta('Birla Opus', 'Style'),
-    'PRIME': _SubBrandMeta('Birla Opus', 'Prime'),
-    'ALLDRY': _SubBrandMeta('Birla Opus', 'AllDry'),
-    'ALLWOOD': _SubBrandMeta('Birla Opus', 'AllWood'),
-    'ONE': _SubBrandMeta('Birla Opus', 'One'),
-
-    // ── JSW Paints ──────────────────────────────────────────────────
-    'HALO': _SubBrandMeta('JSW Paints', 'Halo'),
-    'AURUS': _SubBrandMeta('JSW Paints', 'Aurus'),
-    'PIXA': _SubBrandMeta('JSW Paints', 'Pixa'),
-
-    // ── Nippon Paint ────────────────────────────────────────────────
-    'WEATHERBOND': _SubBrandMeta('Nippon Paint', 'Weatherbond'),
-    'SPOTLESS': _SubBrandMeta('Nippon Paint', 'Spotless'),
-    'SATIN GLO': _SubBrandMeta('Nippon Paint', 'Satin Glo'),
-    'BREEZE': _SubBrandMeta('Nippon Paint', 'Breeze'),
-    'SUMO': _SubBrandMeta('Nippon Paint', 'Sumo'),
-    'BODELAC': _SubBrandMeta('Nippon Paint', 'Bodelac'),
-    'AIRCARE': _SubBrandMeta('Nippon Paint', 'AirCare'),
-    'MATEX': _SubBrandMeta('Nippon Paint', 'Matex'),
-
-    // ── Indigo Paints ───────────────────────────────────────────────
-    'BRIGHT CEILING': _SubBrandMeta('Indigo Paints', 'Bright Ceiling Coat'),
-    'DIRTPROOF': _SubBrandMeta('Indigo Paints', 'Dirtproof'),
-    'FLOOR COAT': _SubBrandMeta('Indigo Paints', 'Floor Coat'),
-    'TILE COAT': _SubBrandMeta('Indigo Paints', 'Tile Coat'),
-
-    // ── British Paints ──────────────────────────────────────────────
-    'SHINGLE': _SubBrandMeta('British Paints', 'Shingle'),
-    'GLAMOUR': _SubBrandMeta('British Paints', 'Glamour'),
-    'ACRI-SILK': _SubBrandMeta('British Paints', 'Acri-Silk'),
-    'STAINGARD': _SubBrandMeta('British Paints', 'Staingard'),
-    'EXPA COOL': _SubBrandMeta('British Paints', 'Expa Cool'),
-
-    // ── Shalimar Paints ─────────────────────────────────────────────
-    'SUPERLAC': _SubBrandMeta('Shalimar Paints', 'Superlac'),
-    'WEATHER PRO': _SubBrandMeta('Shalimar Paints', 'Weather Pro'),
-    'SIGNATURE': _SubBrandMeta('Shalimar Paints', 'Signature'),
-    'SHAKTIMAN': _SubBrandMeta('Shalimar Paints', 'Shaktiman'),
-
-    // ── MRF Corp ────────────────────────────────────────────────────
-    'VAPOCURE': _SubBrandMeta('MRF Corp', 'Vapocure'),
-    'WOODCOAT': _SubBrandMeta('MRF Corp', 'WoodCoat'),
-    'METALCOAT': _SubBrandMeta('MRF Corp', 'MetalCoat'),
-
-    // ── Pidilite ────────────────────────────────────────────────────
-    'DR. FIXIT': _SubBrandMeta('Pidilite', 'Dr. Fixit'),
-    'DR FIXIT': _SubBrandMeta('Pidilite', 'Dr. Fixit'),
-    'ROFF': _SubBrandMeta('Pidilite', 'Roff'),
-  };
-
-  // Specific paint product prefixes and types
-  static final List<String> _paintPrefixes = [
-    'PGE',
-    'APEX',
-    'TRA EML',
-    'TRACTOR',
-    'APCOFRESH',
-    'APCOFRSH',
-    'APCOLITE',
-    'SATIN EN',
-    'SATIN',
-    'ROYALE',
-    'ACE',
-    'TRUCARE',
-    'DAMPROOF',
-    'SMARTCARE',
-    'ULTIMA',
-    'SM GRY',
-    'SNDSTN',
-    'WOODTECH',
-    'CALISTA',
-    'WEATHERCOAT',
-    'SILK GLAMOR',
-    'SILK',
-    'BISON',
-    'IMPRESSIONS',
-    'EXCEL',
-    'WEATHERSHIELD',
-    'VELVET TOUCH',
-    'AURUS',
-    'HALO',
-    'PIXA',
-    'PU',
-    'ENAMEL',
-    'EMULSION',
-    'DISTEMPER',
-    'LUSTRE',
-    'WALL PRIMER',
-    'PRIMER',
-  ];
-
-  // Tokens that are brand names and should NOT be returned as paint names
-  // NOTE: APCOLITE, APCOFRESH, APEX, ROYALE are product sub-brands of Asian Paints — they stay in paint name.
-  static final Set<String> _brandTokensToSkip = {
-    'ASIAN PAINTS',
-    'ASIANPAINTS',
-    'BIRLA OPUS',
-    'BIRLAOPUS',
-    'OPUS',
-    'BIRLA WHITE',
-    'BERGER',
-    'BRITISH PAINTS',
-    'NEROLAC',
-    'KANSAI NEROLAC',
-    'KANSAI',
-    'DULUX',
-    'AKZONOBEL',
-    'JSW PAINTS',
-    'JSW',
-    'NIPPON',
-    'NIPPON PAINT',
-    'INDIGO',
-    'INDIGO PAINTS',
-    'JOTUN',
-    'SHALIMAR',
-    'SHEENLAC',
-    'SNOWCEM',
-    'KAMDHENU',
-    'SIRCA',
-    'ASTRAL',
-    'PIDILITE',
-    'CAMLIN',
-    'GARWARE',
-    'ESDEE',
-    'SAKARNI',
-  };
-
-  /// Extract structured Key-Value data from raw OCR lines
-  static PaintLabelData extract(List<String> rawLines, [String? fullText]) {
+  /// Extract structured Key-Value data from raw OCR lines using dynamic or default rules.
+  static PaintLabelData extract(
+    List<String> rawLines, [
+    String? fullText,
+    ExtractionRules? rules,
+  ]) {
+    final activeRules = rules ?? defaultRules;
     String? packQuantity;
     String? mfd;
     String? batchNo;
@@ -456,22 +125,15 @@ class PaintLabelExtractor {
         final calcMrp = uspNumeric * packVolume;
         mrp = '₹ ${_formatAmount(calcMrp)}';
       }
-    } else if (unitSalePrice == null && mrp != null) {
-      // Fallback derivation if USP was unreadable
-      final mrpNumeric = _parseAmount(mrp);
-      final packVolume = _parsePackVolumeInLitres(packQuantity);
-      if (mrpNumeric != null && packVolume != null && packVolume > 0) {
-        final calcUsp = mrpNumeric / packVolume;
-        final unit = (packQuantity != null && packQuantity.toLowerCase().contains('ml') && packVolume < 1.0) ? 'ml' : 'litre';
-        unitSalePrice = '₹ ${_formatAmount(calcUsp)} / $unit';
-      }
     }
+    // Note: Do not automatically synthesize/derive Unit Sale Price when only MRP is present on the label.
+    // If not detected in the image, unitSalePrice remains null and is omitted from the UI display.
 
     // Phase 3: Brand & Sub-Brand Extraction
-    final (brandName, subBrand) = _extractBrandAndSubBrand(rawLines);
+    final (brandName, subBrand) = _extractBrandAndSubBrand(rawLines, activeRules);
 
     // Phase 4: Paint Name Extraction (Must NOT be the brand name!)
-    final paintName = _extractPaintName(rawLines, brandName: brandName, subBrand: subBrand);
+    final paintName = _extractPaintName(rawLines, rules: activeRules, brandName: brandName, subBrand: subBrand);
 
     // Phase 5: Base and Hardener Extraction (for 2-pack, PU, and base paints)
     final base = _extractBase(rawLines, paintName: paintName);
@@ -532,11 +194,12 @@ class PaintLabelExtractor {
 
   /// Extracts the paint brand name from OCR lines.
   /// Checks each line for known brand tokens and returns the canonical display name.
-  static String? _extractBrandName(List<String> rawLines) {
+  static String? _extractBrandName(List<String> rawLines, [ExtractionRules? rules]) {
+    final knownBrands = (rules ?? defaultRules).knownBrands;
     // Pass 1: Multi-word brands exact check (e.g. "ASIAN PAINTS", "BIRLA OPUS", "KANSAI NEROLAC")
     for (final line in rawLines) {
       final upper = line.trim().toUpperCase();
-      for (final entry in _knownBrands.entries) {
+      for (final entry in knownBrands.entries) {
         if (entry.key.contains(' ')) {
           if (upper.contains(entry.key)) {
             return entry.value;
@@ -548,7 +211,7 @@ class PaintLabelExtractor {
     // Pass 2: Single-word brand tokens (exact word-boundary match on raw text)
     for (final line in rawLines) {
       final upper = line.trim().toUpperCase();
-      for (final entry in _knownBrands.entries) {
+      for (final entry in knownBrands.entries) {
         if (entry.key.contains(' ')) continue;
         if (RegExp('\\b${RegExp.escape(entry.key)}\\b').hasMatch(upper)) {
           return entry.value;
@@ -560,7 +223,7 @@ class PaintLabelExtractor {
     for (final line in rawLines) {
       final cleaned = _cleanOcrToken(line).toUpperCase();
       if (cleaned.isEmpty) continue;
-      for (final entry in _knownBrands.entries) {
+      for (final entry in knownBrands.entries) {
         if (entry.key.contains(' ')) {
           if (cleaned.contains(entry.key)) return entry.value;
         } else {
@@ -588,7 +251,7 @@ class PaintLabelExtractor {
       if (cleaned.isEmpty) continue;
       for (final word in cleaned.split(RegExp(r'\s+'))) {
         if (word.length < 5) continue;
-        for (final entry in _knownBrands.entries) {
+        for (final entry in knownBrands.entries) {
           if (entry.key.contains(' ')) continue;
           final brandKey = entry.key;
           if (brandKey.length < 6) continue;
@@ -605,14 +268,15 @@ class PaintLabelExtractor {
   }
 
   /// Extracts both Parent Brand (manufacturer) and Sub-Brand (product range/line)
-  static (String? brandName, String? subBrand) _extractBrandAndSubBrand(List<String> rawLines) {
-    String? brand = _extractBrandName(rawLines);
+  static (String? brandName, String? subBrand) _extractBrandAndSubBrand(List<String> rawLines, [ExtractionRules? rules]) {
+    final activeRules = rules ?? defaultRules;
+    String? brand = _extractBrandName(rawLines, activeRules);
     String? subBrand;
 
     // 1. Check for multi-word sub-brands first (e.g. "APEX ULTIMA", "VELVET TOUCH", "SILK GLAMOR")
     for (final line in rawLines) {
       final upper = line.trim().toUpperCase();
-      for (final entry in _knownSubBrands.entries) {
+      for (final entry in activeRules.knownSubBrands.entries) {
         if (entry.key.contains(' ')) {
           if (upper.contains(entry.key)) {
             subBrand ??= entry.value.subBrand;
@@ -628,7 +292,7 @@ class PaintLabelExtractor {
     if (subBrand == null) {
       for (final line in rawLines) {
         final upper = line.trim().toUpperCase();
-        for (final entry in _knownSubBrands.entries) {
+        for (final entry in activeRules.knownSubBrands.entries) {
           if (entry.key.contains(' ')) continue;
           if (RegExp('\\b${RegExp.escape(entry.key)}\\b').hasMatch(upper)) {
             subBrand = entry.value.subBrand;
@@ -1082,9 +746,10 @@ class PaintLabelExtractor {
   }
 
   /// Checks if a string contains corporate/brand boilerplate
-  static bool _isBrandOrBoilerplate(String text) {
+  static bool _isBrandOrBoilerplate(String text, [ExtractionRules? rules]) {
     final upper = text.toUpperCase();
-    return _brandAndBoilerplate.any((b) => upper.contains(b));
+    final list = (rules ?? defaultRules).brandAndBoilerplate;
+    return list.any((b) => upper.contains(b));
   }
 
   /// Cleans and formats extracted paint name
@@ -1098,7 +763,15 @@ class PaintLabelExtractor {
   }
 
   /// Extracts specifically the Paint/Shade name, strictly ignoring brand names like "Asian Paints Ltd"
-  static String? _extractPaintName(List<String> rawLines, {String? brandName, String? subBrand}) {
+  static String? _extractPaintName(
+    List<String> rawLines, {
+    ExtractionRules? rules,
+    String? brandName,
+    String? subBrand,
+  }) {
+    final activeRules = rules ?? defaultRules;
+    bool isBoilerplate(String text) => _isBrandOrBoilerplate(text, activeRules);
+
     // Preprocess rawLines to fix common OCR token splits/glues:
     // e.g. "PREMI" + "JM ENAMEL" -> "PREMIUM ENAMEL", "ENA MEL" -> "ENAMEL"
     final effectiveLines = <String>[];
@@ -1120,14 +793,14 @@ class PaintLabelExtractor {
     if (brandName != null) {
       // Add the canonical brand name tokens
       brandTokensUpper.add(brandName.toUpperCase());
-      // Also add all matching keys from _knownBrands that map to this brand (excluding sub-brands like APCOLITE)
-      for (final entry in _knownBrands.entries) {
+      // Also add all matching keys from activeRules.knownBrands that map to this brand (excluding sub-brands like APCOLITE)
+      for (final entry in activeRules.knownBrands.entries) {
         if (entry.value == brandName && entry.key != 'APCOLITE') {
           brandTokensUpper.add(entry.key);
         }
       }
     }
-    brandTokensUpper.addAll(_brandTokensToSkip);
+    brandTokensUpper.addAll(activeRules.brandTokensToSkip);
 
     /// Checks if a line is a brand anchor line (exact or OCR-distorted like "ôpcolie,", "oPcplile", "pcblite")
     bool isBrandAnchorLine(String line) {
@@ -1212,7 +885,7 @@ class PaintLabelExtractor {
         for (int j = i + 1; j <= i + 4 && j < effectiveLines.length; j++) {
           final next = effectiveLines[j].trim();
           final nextUpper = next.toUpperCase();
-          if (_isBrandOrBoilerplate(nextUpper)) break;
+          if (isBoilerplate(nextUpper)) break;
           if (nextUpper.contains('MRP') ||
               nextUpper.contains('MFD') ||
               nextUpper.contains('BEST BEFORE') ||
@@ -1244,8 +917,12 @@ class PaintLabelExtractor {
               nextUpper.contains('ADD COLORANT') ||
               RegExp(r'^[\d\s₹+]+$').hasMatch(next) ||
               RegExp(r'^\d+L\s*(?:NET|HET)?$', caseSensitive: false).hasMatch(next) ||
-              RegExp(r'^\d+Nos\.', caseSensitive: false).hasMatch(next)) break;
-          if (buffer.isNotEmpty && RegExp(r'^[A-Z]{0,2}\d{2,5}$').hasMatch(nextUpper)) break;
+              RegExp(r'^\d+Nos\.', caseSensitive: false).hasMatch(next)) {
+            break;
+          }
+          if (buffer.isNotEmpty && RegExp(r'^[A-Z]{0,2}\d{2,5}$').hasMatch(nextUpper)) {
+            break;
+          }
           if (next.isNotEmpty) {
             if (buffer.isNotEmpty) buffer.write(' ');
             buffer.write(next);
@@ -1254,7 +931,9 @@ class PaintLabelExtractor {
         final candidate = buffer.toString().trim();
         if (candidate.isNotEmpty && candidate.length >= 3) {
           final finalized = finalizePaintName(candidate);
-          if (finalized != null && finalized.isNotEmpty) return finalized;
+          if (finalized != null && finalized.isNotEmpty) {
+            return finalized;
+          }
         }
       }
     }
@@ -1264,7 +943,7 @@ class PaintLabelExtractor {
       final line = effectiveLines[i].trim().replaceAll(RegExp(r'\s+'), ' ');
       final upper = line.toUpperCase();
 
-      if (_isBrandOrBoilerplate(upper)) continue;
+      if (isBoilerplate(upper)) continue;
       if (RegExp(r'^[\d\s]+$').hasMatch(line)) continue;
       if (line.length < 2) continue;
 
@@ -1272,7 +951,7 @@ class PaintLabelExtractor {
       if (isBrandAnchorLine(line)) continue;
 
       // Check if current line contains a known paint prefix
-      for (final prefix in _paintPrefixes) {
+      for (final prefix in activeRules.paintPrefixes) {
         // Skip prefixes that are also brand tokens (e.g. APCOLITE, APCOFRESH)
         if (brandTokensUpper.contains(prefix)) continue;
 
@@ -1282,7 +961,7 @@ class PaintLabelExtractor {
           if ((upper == prefix || line.length <= prefix.length + 3) && i + 1 < effectiveLines.length) {
             final nextLine = effectiveLines[i + 1].trim().replaceAll(RegExp(r'\s+'), ' ');
             final nextUpper = nextLine.toUpperCase();
-            if (!_isBrandOrBoilerplate(nextUpper) &&
+            if (!isBoilerplate(nextUpper) &&
                 !RegExp(r'^[\d\s]+$').hasMatch(nextLine) &&
                 !nextUpper.contains('MRP') &&
                 !nextUpper.contains('MFD') &&
@@ -1326,7 +1005,7 @@ class PaintLabelExtractor {
       final line = effectiveLines[i].trim().replaceAll(RegExp(r'\s+'), ' ');
       final upper = line.toUpperCase();
 
-      if (_isBrandOrBoilerplate(upper)) continue;
+      if (isBoilerplate(upper)) continue;
       if (upper.contains('MRP') ||
           upper.contains('MFD') ||
           upper.contains('SALE PRICE') ||
@@ -1337,7 +1016,7 @@ class PaintLabelExtractor {
       final match = paintPatternRegex.firstMatch(upper);
       if (match != null) {
         final candidate = match.group(0)!;
-        if (!_isBrandOrBoilerplate(candidate) && candidate.length >= 5) {
+        if (!isBoilerplate(candidate) && candidate.length >= 5) {
           return finalizePaintName(candidate);
         }
       }
@@ -1349,7 +1028,7 @@ class PaintLabelExtractor {
       if (RegExp(r'0001\s*\d{3,4}\s*\d{3}').hasMatch(line) && i + 1 < effectiveLines.length) {
         final candidate = effectiveLines[i + 1].trim().replaceAll(RegExp(r'\s+'), ' ');
         final upper = candidate.toUpperCase();
-        if (!_isBrandOrBoilerplate(upper) &&
+        if (!isBoilerplate(upper) &&
             !upper.contains('MRP') &&
             !upper.contains('MFD') &&
             candidate.length >= 3) {
