@@ -4,7 +4,6 @@ import '../models/paint_label_data.dart';
 class _SubBrandMeta {
   final String parentBrand;
   final String subBrand;
-
   const _SubBrandMeta(this.parentBrand, this.subBrand);
 }
 

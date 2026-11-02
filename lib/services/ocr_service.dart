@@ -8,7 +8,7 @@ import '../models/extracted_text_result.dart';
 /// No API keys, no server costs, and completely offline.
 class OcrService {
   TextRecognizer? _textRecognizer;
-
+   
   TextRecognizer get _recognizer {
     _textRecognizer ??= TextRecognizer(script: TextRecognitionScript.latin);
     return _textRecognizer!;
